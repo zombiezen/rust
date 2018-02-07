@@ -181,7 +181,7 @@ on_failure:
 
 branches:
   only:
-    - auto
+    - llvm-6-try
 
 before_deploy:
   - ps: |
