@@ -47,7 +47,7 @@ pub enum InstanceDef<'tcx> {
     ///`<T as Clone>::clone` shim for arrays and tuples
     CloneStructuralShim(DefId, Ty<'tcx>),
     ///`<T as Clone>::clone` shim for closures
-    CloneNominalShim(DefId, Ty<'tcx>),
+    CloneNominalShim { clone: DefId, ty: DefId },
 }
 
 impl<'a, 'tcx> Instance<'tcx> {
@@ -72,7 +72,7 @@ impl<'tcx> InstanceDef<'tcx> {
             InstanceDef::DropGlue(def_id, _) |
             InstanceDef::CloneCopyShim(def_id) |
             InstanceDef::CloneStructuralShim(def_id, _) |
-            InstanceDef::CloneNominalShim(def_id, _) => def_id
+            InstanceDef::CloneNominalShim{ clone: def_id, ..} => def_id
         }
     }
 
@@ -138,11 +138,11 @@ impl<'tcx> fmt::Display for Instance<'tcx> {
             InstanceDef::DropGlue(_, ty) => {
                 write!(f, " - shim({:?})", ty)
             }
-            InstanceDef::CloneCopyShim(def) => {
+            InstanceDef::CloneCopyShim(def) |
+            InstanceDef::CloneNominalShim { ty: def, ..} => {
                 write!(f, " - shim({:?})", def)
             }
-            InstanceDef::CloneStructuralShim(_, ty) |
-            InstanceDef::CloneNominalShim(_, ty) => {
+            InstanceDef::CloneStructuralShim(_, ty) => {
                 write!(f, " - shim({:?})", ty)
             }
         }
@@ -300,6 +300,7 @@ fn resolve_associated_item<'a, 'tcx>(
         }
         traits::VtableBuiltin(..) => {
             if let Some(_) = tcx.lang_items().clone_trait() {
+                let mut substs = rcvr_substs;
                 let name = tcx.item_name(def_id);
                 let def = if name == "clone" {
                     let self_ty = trait_ref.self_ty();
@@ -309,7 +310,13 @@ fn resolve_associated_item<'a, 'tcx>(
                         }
                         ty::TyArray(..) => ty::InstanceDef::CloneStructuralShim(def_id, self_ty),
                         ty::TyTuple(..) => ty::InstanceDef::CloneStructuralShim(def_id, self_ty),
-                        ty::TyClosure(..) => ty::InstanceDef::CloneNominalShim(def_id, self_ty),
+                        ty::TyClosure(ty_did, closure_substs) => {
+                            substs = closure_substs.substs;
+                            ty::InstanceDef::CloneNominalShim {
+                                clone: def_id,
+                                ty: ty_did
+                            }
+                        }
                         _ => unreachable!("Type {:?} does not have clone shims", self_ty)
                     }
                 } else {
@@ -317,7 +324,7 @@ fn resolve_associated_item<'a, 'tcx>(
                 };
                 Some(Instance {
                     def,
-                    substs: rcvr_substs
+                    substs
                 })
             } else {
                 None
